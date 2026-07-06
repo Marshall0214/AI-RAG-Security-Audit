@@ -112,6 +112,27 @@ http://127.0.0.1:8000/docs
 6. 注册管理员 Admin。
 7. Admin 可以查看所有文档。
 
+## Swagger 页面授权方式
+
+打开接口页面：
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+登录接口 `/auth/login` 会返回：
+
+```json
+{
+  "access_token": "token value",
+  "token_type": "bearer"
+}
+```
+
+点击页面右上角 `Authorize`，在 `Bearer Token` 输入框里只粘贴 `access_token` 的值，不需要手动输入 `Bearer ` 前缀。
+
+授权成功后，`GET /me`、`POST /documents`、`GET /documents`、`GET /admin/documents` 这些接口旁边会显示小锁，可以直接在 Swagger 页面里测试。
+
 ## 秋招简历写法
 
 项目：AI-RAG-Security-Audit：面向 RAG 与 Agent 应用的安全审计实验平台

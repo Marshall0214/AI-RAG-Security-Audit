@@ -1,18 +1,27 @@
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.database import db
 from app.models import Role, User
 from app.security import verify_token
 
+bearer_scheme = HTTPBearer(
+    scheme_name="Bearer Token",
+    description="Paste the access_token returned by /auth/login.",
+    auto_error=False,
+)
 
-def get_current_user(authorization: str | None = Header(default=None)) -> User:
-    if authorization is None or not authorization.startswith("Bearer "):
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> User:
+    if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="missing bearer token",
         )
 
-    token = authorization.removeprefix("Bearer ").strip()
+    token = credentials.credentials
     payload = verify_token(token)
     if payload is None:
         raise HTTPException(
