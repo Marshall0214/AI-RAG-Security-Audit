@@ -1,0 +1,69 @@
+### Health check
+GET http://127.0.0.1:8000/health
+
+### Register Alice
+POST http://127.0.0.1:8000/auth/register
+Content-Type: application/json
+
+{
+  "username": "alice",
+  "password": "alice123",
+  "tenant_id": "tenant-a",
+  "role": "user"
+}
+
+### Login Alice
+POST http://127.0.0.1:8000/auth/login
+Content-Type: application/json
+
+{
+  "username": "alice",
+  "password": "alice123"
+}
+
+### Create Alice document
+POST http://127.0.0.1:8000/documents
+Content-Type: application/json
+Authorization: Bearer {{alice_token}}
+
+{
+  "title": "Alice private document",
+  "content": "This is Alice private RAG document."
+}
+
+### Register Bob
+POST http://127.0.0.1:8000/auth/register
+Content-Type: application/json
+
+{
+  "username": "bob",
+  "password": "bob12345",
+  "tenant_id": "tenant-b",
+  "role": "user"
+}
+
+### Login Bob
+POST http://127.0.0.1:8000/auth/login
+Content-Type: application/json
+
+{
+  "username": "bob",
+  "password": "bob12345"
+}
+
+### Bob attempts to read Alice document
+GET http://127.0.0.1:8000/documents/1
+Authorization: Bearer {{bob_token}}
+
+### Login default admin
+POST http://127.0.0.1:8000/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "admin123"
+}
+
+### Admin lists all documents
+GET http://127.0.0.1:8000/admin/documents
+Authorization: Bearer {{admin_token}}
