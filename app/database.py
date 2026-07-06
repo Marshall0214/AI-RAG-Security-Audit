@@ -1,4 +1,5 @@
-from app.models import Document, Role, User
+from app.models import Document, DocumentChunk, Role, User
+from app.rag import chunk_text, score_chunk
 from app.security import hash_password
 
 
@@ -6,8 +7,10 @@ class InMemoryDatabase:
     def __init__(self) -> None:
         self.users: dict[int, User] = {}
         self.documents: dict[int, Document] = {}
+        self.document_chunks: dict[int, DocumentChunk] = {}
         self._user_id = 1
         self._document_id = 1
+        self._chunk_id = 1
 
         self.create_user(
             username="admin",
@@ -56,7 +59,25 @@ class InMemoryDatabase:
         )
         self.documents[document.id] = document
         self._document_id += 1
+        self.create_chunks_for_document(document)
         return document
+
+    def create_chunks_for_document(self, document: Document) -> list[DocumentChunk]:
+        chunks: list[DocumentChunk] = []
+        for index, text in enumerate(chunk_text(document.content)):
+            chunk = DocumentChunk(
+                id=self._chunk_id,
+                document_id=document.id,
+                chunk_index=index,
+                text=text,
+                owner_id=document.owner_id,
+                tenant_id=document.tenant_id,
+            )
+            self.document_chunks[chunk.id] = chunk
+            self._chunk_id += 1
+            chunks.append(chunk)
+
+        return chunks
 
     def list_documents_for_user(self, user: User) -> list[Document]:
         if user.role == Role.ADMIN:
@@ -84,6 +105,49 @@ class InMemoryDatabase:
             return document
 
         return None
+
+    def search_chunks_for_user(
+        self,
+        query: str,
+        user: User,
+        max_results: int,
+    ) -> list[tuple[DocumentChunk, int]]:
+        if user.role == Role.ADMIN:
+            chunks = list(self.document_chunks.values())
+        else:
+            chunks = [
+                chunk
+                for chunk in self.document_chunks.values()
+                if chunk.owner_id == user.id and chunk.tenant_id == user.tenant_id
+            ]
+
+        return self._rank_chunks(query, chunks, max_results)
+
+    def search_all_chunks(
+        self,
+        query: str,
+        max_results: int,
+    ) -> list[tuple[DocumentChunk, int]]:
+        return self._rank_chunks(query, list(self.document_chunks.values()), max_results)
+
+    def _rank_chunks(
+        self,
+        query: str,
+        chunks: list[DocumentChunk],
+        max_results: int,
+    ) -> list[tuple[DocumentChunk, int]]:
+        scored_chunks: list[tuple[DocumentChunk, int]] = []
+        for chunk in chunks:
+            document = self.documents.get(chunk.document_id)
+            if document is None:
+                continue
+
+            score = score_chunk(query, chunk, document.title)
+            if score > 0:
+                scored_chunks.append((chunk, score))
+
+        scored_chunks.sort(key=lambda item: item[1], reverse=True)
+        return scored_chunks[:max_results]
 
 
 db = InMemoryDatabase()

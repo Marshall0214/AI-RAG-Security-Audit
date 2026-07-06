@@ -23,3 +23,13 @@ class Document:
     content: str
     owner_id: int
     tenant_id: str
+
+
+@dataclass
+class DocumentChunk:
+    id: int
+    document_id: int
+    chunk_index: int
+    text: str
+    owner_id: int
+    tenant_id: str

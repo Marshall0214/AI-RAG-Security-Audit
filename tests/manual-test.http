@@ -67,3 +67,43 @@ Content-Type: application/json
 ### Admin lists all documents
 GET http://127.0.0.1:8000/admin/documents
 Authorization: Bearer {{admin_token}}
+
+### Alice creates a RAG-sensitive document
+POST http://127.0.0.1:8000/documents
+Content-Type: application/json
+Authorization: Bearer {{alice_token}}
+
+{
+  "title": "Alice secret plan",
+  "content": "Project phoenix secret: Alice owns this private RAG document."
+}
+
+### Alice queries safe RAG and can find her own document
+POST http://127.0.0.1:8000/rag/query
+Content-Type: application/json
+Authorization: Bearer {{alice_token}}
+
+{
+  "query": "phoenix secret",
+  "max_results": 5
+}
+
+### Bob queries safe RAG and should not find Alice document
+POST http://127.0.0.1:8000/rag/query
+Content-Type: application/json
+Authorization: Bearer {{bob_token}}
+
+{
+  "query": "phoenix secret",
+  "max_results": 5
+}
+
+### Bob queries intentionally vulnerable RAG and can find Alice document
+POST http://127.0.0.1:8000/lab/vulnerable-rag/query
+Content-Type: application/json
+Authorization: Bearer {{bob_token}}
+
+{
+  "query": "phoenix secret",
+  "max_results": 5
+}

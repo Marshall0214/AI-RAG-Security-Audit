@@ -2,11 +2,14 @@ from fastapi import Depends, FastAPI, HTTPException, status
 
 from app.auth import get_current_user, require_admin
 from app.database import db
-from app.models import User
+from app.models import DocumentChunk, User
 from app.schemas import (
     DocumentCreate,
     DocumentResponse,
     LoginRequest,
+    RagChunkMatch,
+    RagQueryRequest,
+    RagQueryResponse,
     RegisterRequest,
     TokenResponse,
     UserResponse,
@@ -15,8 +18,8 @@ from app.security import create_token, verify_password
 
 app = FastAPI(
     title="AI-RAG-Security-Audit",
-    description="AI 应用安全审计实验平台第一版",
-    version="0.1.0",
+    description="AI application security audit lab for RAG and Agent scenarios.",
+    version="0.2.0",
 )
 
 
@@ -26,6 +29,48 @@ def to_user_response(user: User) -> UserResponse:
         username=user.username,
         tenant_id=user.tenant_id,
         role=user.role,
+    )
+
+
+def to_rag_response(
+    query: str,
+    matches: list[tuple[DocumentChunk, int]],
+    vulnerable: bool,
+) -> RagQueryResponse:
+    chunk_matches: list[RagChunkMatch] = []
+    for chunk, score in matches:
+        document = db.documents[chunk.document_id]
+        chunk_matches.append(
+            RagChunkMatch(
+                chunk_id=chunk.id,
+                document_id=chunk.document_id,
+                document_title=document.title,
+                chunk_index=chunk.chunk_index,
+                text=chunk.text,
+                owner_id=chunk.owner_id,
+                tenant_id=chunk.tenant_id,
+                score=score,
+            )
+        )
+
+    if not chunk_matches:
+        answer = "No relevant authorized document chunks were found."
+    elif vulnerable:
+        answer = (
+            "VULNERABLE DEMO: results were retrieved without user or tenant "
+            "filtering. This may expose another user's document content."
+        )
+    else:
+        answer = (
+            "Retrieved relevant chunks after applying current-user access control. "
+            "Only authorized document chunks are included."
+        )
+
+    return RagQueryResponse(
+        query=query,
+        answer=answer,
+        match_count=len(chunk_matches),
+        matches=chunk_matches,
     )
 
 
@@ -113,3 +158,28 @@ def admin_list_documents(
         DocumentResponse(**document.__dict__)
         for document in db.documents.values()
     ]
+
+
+@app.post("/rag/query", response_model=RagQueryResponse)
+def safe_rag_query(
+    request: RagQueryRequest,
+    current_user: User = Depends(get_current_user),
+) -> RagQueryResponse:
+    matches = db.search_chunks_for_user(
+        query=request.query,
+        user=current_user,
+        max_results=request.max_results,
+    )
+    return to_rag_response(request.query, matches, vulnerable=False)
+
+
+@app.post("/lab/vulnerable-rag/query", response_model=RagQueryResponse)
+def vulnerable_rag_query(
+    request: RagQueryRequest,
+    _: User = Depends(get_current_user),
+) -> RagQueryResponse:
+    matches = db.search_all_chunks(
+        query=request.query,
+        max_results=request.max_results,
+    )
+    return to_rag_response(request.query, matches, vulnerable=True)

@@ -12,6 +12,13 @@
 - 越权访问验证
 - 后续可扩展 RAG、Prompt Injection、Agent 工具越权、自动化红队测试
 
+第二版已经加入轻量 RAG 检索安全实验：
+
+- 文档上传后自动切片
+- `POST /rag/query`：安全版 RAG 检索，只召回当前用户可访问文档
+- `POST /lab/vulnerable-rag/query`：故意保留的漏洞版 RAG 检索，不做用户/租户过滤
+- 用 Bob 检索 Alice 文档的方式演示 RAG 跨用户数据泄露
+
 ## 项目定位
 
 这是一个“可被攻击、可被修复、可被审计”的 AI 应用安全项目。
@@ -36,6 +43,8 @@
 - `GET /documents`：查看当前用户可访问文档
 - `GET /documents/{document_id}`：查看文档详情
 - `GET /admin/documents`：管理员查看所有文档
+- `POST /rag/query`：安全版 RAG 检索
+- `POST /lab/vulnerable-rag/query`：漏洞版 RAG 检索演示
 
 ### 安全设计
 
@@ -111,6 +120,9 @@ http://127.0.0.1:8000/docs
 5. Bob 尝试访问 Alice 的文档，应返回 `403 Forbidden`。
 6. 注册管理员 Admin。
 7. Admin 可以查看所有文档。
+8. Alice 上传包含 `Project phoenix secret` 的文档。
+9. Bob 请求 `/rag/query` 查询 `phoenix secret`，应返回 0 条结果。
+10. Bob 请求 `/lab/vulnerable-rag/query` 查询 `phoenix secret`，会召回 Alice 文档，用于演示漏洞。
 
 ## Swagger 页面授权方式
 
@@ -143,14 +155,6 @@ http://127.0.0.1:8000/docs
 - 后续计划接入 LangChain/LlamaIndex、Chroma/Qdrant、promptfoo、garak/PyRIT，扩展 Prompt Injection、RAG 污染、工具调用越权和自动化红队测试。
 
 ## 下一版计划
-
-第二版目标：
-
-- 接入文档切片
-- 接入本地向量库 Chroma
-- 增加 `/rag/query` 接口
-- 故意实现一个“不做租户过滤的检索漏洞”
-- 编写 RAG 跨租户检索复现报告
 
 第三版目标：
 
