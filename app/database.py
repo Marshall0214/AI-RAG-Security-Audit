@@ -1,4 +1,4 @@
-from app.models import Document, DocumentChunk, Role, User
+from app.models import Document, DocumentChunk, Order, Role, User
 from app.rag import chunk_text, score_chunk
 from app.security import hash_password
 
@@ -8,9 +8,11 @@ class InMemoryDatabase:
         self.users: dict[int, User] = {}
         self.documents: dict[int, Document] = {}
         self.document_chunks: dict[int, DocumentChunk] = {}
+        self.orders: dict[int, Order] = {}
         self._user_id = 1
         self._document_id = 1
         self._chunk_id = 1
+        self._order_id = 1
 
         self.create_user(
             username="admin",
@@ -105,6 +107,53 @@ class InMemoryDatabase:
             return document
 
         return None
+
+    def create_order(
+        self,
+        item_name: str,
+        shipping_address: str,
+        owner: User,
+    ) -> Order:
+        order = Order(
+            id=self._order_id,
+            item_name=item_name,
+            shipping_address=shipping_address,
+            owner_id=owner.id,
+            tenant_id=owner.tenant_id,
+        )
+        self.orders[order.id] = order
+        self._order_id += 1
+        return order
+
+    def list_orders_for_user(self, user: User) -> list[Order]:
+        if user.role == Role.ADMIN:
+            return list(self.orders.values())
+
+        return [
+            order
+            for order in self.orders.values()
+            if order.owner_id == user.id and order.tenant_id == user.tenant_id
+        ]
+
+    def get_order_for_user(self, order_id: int, user: User) -> Order | None:
+        order = self.orders.get(order_id)
+        if order is None:
+            return None
+
+        if user.role == Role.ADMIN:
+            return order
+
+        if order.owner_id == user.id and order.tenant_id == user.tenant_id:
+            return order
+
+        return None
+
+    def get_order_without_authorization(self, order_id: int) -> Order | None:
+        return self.orders.get(order_id)
+
+    def update_order_address(self, order: Order, new_address: str) -> Order:
+        order.shipping_address = new_address
+        return order
 
     def search_chunks_for_user(
         self,

@@ -107,3 +107,59 @@ Authorization: Bearer {{bob_token}}
   "query": "phoenix secret",
   "max_results": 5
 }
+
+### Alice creates an order
+POST http://127.0.0.1:8000/orders
+Content-Type: application/json
+Authorization: Bearer {{alice_token}}
+
+{
+  "item_name": "Security Book",
+  "shipping_address": "Alice Old Address"
+}
+
+### Alice lists her orders
+GET http://127.0.0.1:8000/orders
+Authorization: Bearer {{alice_token}}
+
+### Bob safely queries Alice order and should receive 403
+POST http://127.0.0.1:8000/agent/tools/order-query
+Content-Type: application/json
+Authorization: Bearer {{bob_token}}
+
+{
+  "order_id": 1
+}
+
+### Bob uses intentionally vulnerable order query and can read Alice order
+POST http://127.0.0.1:8000/lab/vulnerable-agent/order-query
+Content-Type: application/json
+Authorization: Bearer {{bob_token}}
+
+{
+  "order_id": 1
+}
+
+### Bob safely updates Alice order address and should receive 403
+POST http://127.0.0.1:8000/agent/tools/address-update
+Content-Type: application/json
+Authorization: Bearer {{bob_token}}
+
+{
+  "order_id": 1,
+  "new_address": "Bob Attack Address"
+}
+
+### Bob uses intentionally vulnerable address update and can modify Alice order
+POST http://127.0.0.1:8000/lab/vulnerable-agent/address-update
+Content-Type: application/json
+Authorization: Bearer {{bob_token}}
+
+{
+  "order_id": 1,
+  "new_address": "Bob Attack Address"
+}
+
+### Alice sees that her order address was modified through the vulnerable tool
+GET http://127.0.0.1:8000/orders
+Authorization: Bearer {{alice_token}}

@@ -4,9 +4,14 @@ from app.auth import get_current_user, require_admin
 from app.database import db
 from app.models import DocumentChunk, User
 from app.schemas import (
+    AddressUpdateRequest,
+    AgentToolResponse,
     DocumentCreate,
     DocumentResponse,
     LoginRequest,
+    OrderCreate,
+    OrderQueryRequest,
+    OrderResponse,
     RagChunkMatch,
     RagQueryRequest,
     RagQueryResponse,
@@ -19,7 +24,7 @@ from app.security import create_token, verify_password
 app = FastAPI(
     title="AI-RAG-Security-Audit",
     description="AI application security audit lab for RAG and Agent scenarios.",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 
@@ -29,6 +34,24 @@ def to_user_response(user: User) -> UserResponse:
         username=user.username,
         tenant_id=user.tenant_id,
         role=user.role,
+    )
+
+
+def to_order_response(order: object) -> OrderResponse:
+    return OrderResponse(**order.__dict__)
+
+
+def to_agent_tool_response(
+    tool_name: str,
+    safe: bool,
+    message: str,
+    order: object,
+) -> AgentToolResponse:
+    return AgentToolResponse(
+        tool_name=tool_name,
+        safe=safe,
+        message=message,
+        order=to_order_response(order),
     )
 
 
@@ -158,6 +181,108 @@ def admin_list_documents(
         DocumentResponse(**document.__dict__)
         for document in db.documents.values()
     ]
+
+
+@app.post("/orders", response_model=OrderResponse, status_code=201)
+def create_order(
+    request: OrderCreate,
+    current_user: User = Depends(get_current_user),
+) -> OrderResponse:
+    order = db.create_order(
+        item_name=request.item_name,
+        shipping_address=request.shipping_address,
+        owner=current_user,
+    )
+    return to_order_response(order)
+
+
+@app.get("/orders", response_model=list[OrderResponse])
+def list_orders(
+    current_user: User = Depends(get_current_user),
+) -> list[OrderResponse]:
+    return [to_order_response(order) for order in db.list_orders_for_user(current_user)]
+
+
+@app.post("/agent/tools/order-query", response_model=AgentToolResponse)
+def safe_agent_order_query(
+    request: OrderQueryRequest,
+    current_user: User = Depends(get_current_user),
+) -> AgentToolResponse:
+    order = db.get_order_for_user(request.order_id, current_user)
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="order not found or access denied",
+        )
+
+    return to_agent_tool_response(
+        tool_name="order-query",
+        safe=True,
+        message="Order returned after current-user authorization.",
+        order=order,
+    )
+
+
+@app.post("/agent/tools/address-update", response_model=AgentToolResponse)
+def safe_agent_address_update(
+    request: AddressUpdateRequest,
+    current_user: User = Depends(get_current_user),
+) -> AgentToolResponse:
+    order = db.get_order_for_user(request.order_id, current_user)
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="order not found or access denied",
+        )
+
+    updated_order = db.update_order_address(order, request.new_address)
+    return to_agent_tool_response(
+        tool_name="address-update",
+        safe=True,
+        message="Address updated after current-user authorization.",
+        order=updated_order,
+    )
+
+
+@app.post("/lab/vulnerable-agent/order-query", response_model=AgentToolResponse)
+def vulnerable_agent_order_query(
+    request: OrderQueryRequest,
+    _: User = Depends(get_current_user),
+) -> AgentToolResponse:
+    order = db.get_order_without_authorization(request.order_id)
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="order not found",
+        )
+
+    return to_agent_tool_response(
+        tool_name="vulnerable-order-query",
+        safe=False,
+        message="VULNERABLE DEMO: order returned without owner or tenant authorization.",
+        order=order,
+    )
+
+
+@app.post("/lab/vulnerable-agent/address-update", response_model=AgentToolResponse)
+def vulnerable_agent_address_update(
+    request: AddressUpdateRequest,
+    _: User = Depends(get_current_user),
+) -> AgentToolResponse:
+    order = db.get_order_without_authorization(request.order_id)
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="order not found",
+        )
+
+    updated_order = db.update_order_address(order, request.new_address)
+    return to_agent_tool_response(
+        tool_name="vulnerable-address-update",
+        safe=False,
+        message="VULNERABLE DEMO: address updated without owner or tenant authorization.",
+        order=updated_order,
+    )
 
 
 @app.post("/rag/query", response_model=RagQueryResponse)

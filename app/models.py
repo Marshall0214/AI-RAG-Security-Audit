@@ -33,3 +33,12 @@ class DocumentChunk:
     text: str
     owner_id: int
     tenant_id: str
+
+
+@dataclass
+class Order:
+    id: int
+    item_name: str
+    shipping_address: str
+    owner_id: int
+    tenant_id: str

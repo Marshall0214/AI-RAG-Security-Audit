@@ -181,3 +181,129 @@ matches = search(all_chunks, query)
 可以这样讲：
 
 > 第一版我先实现了用户、租户、文档归属和 Bearer Token 鉴权，验证了 Bob 无法通过 API 直接读取 Alice 文档。第二版我进一步模拟 RAG 检索，把文档切成 chunk，并且在每个 chunk 上保留 owner_id 和 tenant_id。安全版 `/rag/query` 会先按当前用户过滤可访问 chunk，再做检索；漏洞版 `/lab/vulnerable-rag/query` 故意不做过滤，用来演示 Bob 可以通过关键词召回 Alice 的文档内容。这个实验说明 RAG 的权限控制必须发生在检索阶段，不能把所有内容召回后再交给模型判断。
+
+## 第三版：Agent 工具调用越权实验
+
+第三版的目标是把项目从 RAG 检索安全扩展到 Agent 工具调用安全。
+
+真实 AI Agent 应用通常不会只回答问题，还会调用后端工具完成业务操作，例如：
+
+- 查询订单
+- 修改收货地址
+- 发起退款
+- 查询用户资料
+- 创建工单
+
+这些工具一旦连接真实业务系统，就不能把“模型说可以操作”当成权限依据。模型只能生成候选参数，真正的权限判断必须在后端工具执行前完成。
+
+### 第三版新增能力
+
+- 新增订单数据模型 `Order`。
+- 新增普通用户创建订单接口。
+- 新增安全版 Agent 工具接口：
+  - `POST /agent/tools/order-query`
+  - `POST /agent/tools/address-update`
+- 新增漏洞版 Agent 工具接口：
+  - `POST /lab/vulnerable-agent/order-query`
+  - `POST /lab/vulnerable-agent/address-update`
+- 新增 Agent 工具调用越权报告。
+
+### 第三版新增数据模型
+
+`Order`：
+
+- `id`：订单 ID
+- `item_name`：商品名称
+- `shipping_address`：收货地址
+- `owner_id`：订单所属用户 ID
+- `tenant_id`：订单所属租户
+
+订单和文档一样，都必须绑定 `owner_id` 和 `tenant_id`。原因是 Agent 工具最终操作的是业务资产，不是抽象文本。
+
+### 安全版工具接口
+
+#### `POST /agent/tools/order-query`
+
+安全逻辑：
+
+1. 用户必须登录。
+2. 后端根据 `order_id` 查询订单。
+3. 普通用户只能查询自己的订单。
+4. 普通用户不能查询其他用户或其他租户订单。
+5. 管理员可以查询全部订单。
+
+伪代码：
+
+```text
+order = get_order(order_id)
+
+if current_user.role != admin:
+  require order.owner_id == current_user.id
+  require order.tenant_id == current_user.tenant_id
+
+return order
+```
+
+#### `POST /agent/tools/address-update`
+
+安全逻辑：
+
+1. 用户必须登录。
+2. 后端根据 `order_id` 查询订单。
+3. 后端校验当前用户是否有权修改该订单。
+4. 只有校验通过后才更新地址。
+
+伪代码：
+
+```text
+order = get_order(order_id)
+authorize(current_user, order)
+order.shipping_address = new_address
+```
+
+### 漏洞版工具接口
+
+#### `POST /lab/vulnerable-agent/order-query`
+
+漏洞逻辑：
+
+1. 用户必须登录。
+2. 但后端只按 `order_id` 查询订单。
+3. 不校验 `owner_id`。
+4. 不校验 `tenant_id`。
+5. Bob 可以查询 Alice 的订单。
+
+#### `POST /lab/vulnerable-agent/address-update`
+
+漏洞逻辑：
+
+1. 用户必须登录。
+2. 但后端只按 `order_id` 修改订单。
+3. 不校验当前用户是否拥有该订单。
+4. Bob 可以修改 Alice 的收货地址。
+
+这个接口模拟了 Agent 工具调用中最危险的一类问题：模型或 Agent 传入了一个看似合法的 `order_id`，后端工具却没有重新做权限校验。
+
+### 第三版安全验证
+
+验证路径：
+
+1. Alice 创建订单。
+2. Bob 登录。
+3. Bob 调用安全查询工具查询 Alice 订单，应返回 `403 Forbidden`。
+4. Bob 调用漏洞查询工具查询 Alice 订单，会成功返回订单。
+5. Bob 调用安全地址修改工具修改 Alice 订单，应返回 `403 Forbidden`。
+6. Bob 调用漏洞地址修改工具修改 Alice 订单，会成功修改。
+7. Alice 再查询自己的订单，可以看到地址已被漏洞接口篡改。
+
+结论：
+
+- Agent 工具执行前必须做后端鉴权。
+- 不能相信模型生成的 `order_id`、`user_id`、`tenant_id`。
+- 不能把系统提示词、Agent 规划或“用户声明”当作权限边界。
+
+### 第三版面试讲法
+
+可以这样讲：
+
+> 第三版我模拟了 Agent 工具调用场景，设计了订单查询和地址修改两个工具。安全版工具会在执行前根据当前登录用户校验订单的 owner_id 和 tenant_id，因此 Bob 不能查询或修改 Alice 的订单。漏洞版工具故意只按 order_id 操作，不做后端鉴权，结果 Bob 可以读取并修改 Alice 的订单。这个实验说明 Agent 安全的关键不是让模型“更听话”，而是工具执行层必须有强制权限控制。

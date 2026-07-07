@@ -61,3 +61,32 @@ class RagQueryResponse(BaseModel):
     answer: str
     match_count: int
     matches: list[RagChunkMatch]
+
+
+class OrderCreate(BaseModel):
+    item_name: str = Field(min_length=1, max_length=120)
+    shipping_address: str = Field(min_length=1, max_length=240)
+
+
+class OrderResponse(BaseModel):
+    id: int
+    item_name: str
+    shipping_address: str
+    owner_id: int
+    tenant_id: str
+
+
+class OrderQueryRequest(BaseModel):
+    order_id: int = Field(ge=1)
+
+
+class AddressUpdateRequest(BaseModel):
+    order_id: int = Field(ge=1)
+    new_address: str = Field(min_length=1, max_length=240)
+
+
+class AgentToolResponse(BaseModel):
+    tool_name: str
+    safe: bool
+    message: str
+    order: OrderResponse

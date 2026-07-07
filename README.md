@@ -19,6 +19,16 @@
 - `POST /lab/vulnerable-rag/query`：故意保留的漏洞版 RAG 检索，不做用户/租户过滤
 - 用 Bob 检索 Alice 文档的方式演示 RAG 跨用户数据泄露
 
+第三版已经加入 Agent 工具调用越权实验：
+
+- `POST /orders`：创建订单
+- `GET /orders`：查看当前用户可访问订单
+- `POST /agent/tools/order-query`：安全版订单查询工具
+- `POST /agent/tools/address-update`：安全版地址修改工具
+- `POST /lab/vulnerable-agent/order-query`：漏洞版订单查询工具
+- `POST /lab/vulnerable-agent/address-update`：漏洞版地址修改工具
+- 用 Bob 查询和修改 Alice 订单的方式演示 Agent 工具越权
+
 ## 项目定位
 
 这是一个“可被攻击、可被修复、可被审计”的 AI 应用安全项目。
@@ -45,6 +55,12 @@
 - `GET /admin/documents`：管理员查看所有文档
 - `POST /rag/query`：安全版 RAG 检索
 - `POST /lab/vulnerable-rag/query`：漏洞版 RAG 检索演示
+- `POST /orders`：创建订单
+- `GET /orders`：查看当前用户可访问订单
+- `POST /agent/tools/order-query`：安全版 Agent 订单查询工具
+- `POST /agent/tools/address-update`：安全版 Agent 地址修改工具
+- `POST /lab/vulnerable-agent/order-query`：漏洞版 Agent 订单查询工具
+- `POST /lab/vulnerable-agent/address-update`：漏洞版 Agent 地址修改工具
 
 ### 安全设计
 
@@ -123,6 +139,11 @@ http://127.0.0.1:8000/docs
 8. Alice 上传包含 `Project phoenix secret` 的文档。
 9. Bob 请求 `/rag/query` 查询 `phoenix secret`，应返回 0 条结果。
 10. Bob 请求 `/lab/vulnerable-rag/query` 查询 `phoenix secret`，会召回 Alice 文档，用于演示漏洞。
+11. Alice 创建订单。
+12. Bob 请求 `/agent/tools/order-query` 查询 Alice 订单，应返回 `403 Forbidden`。
+13. Bob 请求 `/lab/vulnerable-agent/order-query` 查询 Alice 订单，会返回订单详情。
+14. Bob 请求 `/agent/tools/address-update` 修改 Alice 订单地址，应返回 `403 Forbidden`。
+15. Bob 请求 `/lab/vulnerable-agent/address-update` 修改 Alice 订单地址，会成功修改，用于演示漏洞。
 
 ## Swagger 页面授权方式
 
@@ -158,10 +179,10 @@ http://127.0.0.1:8000/docs
 
 第三版目标：
 
-- 增加 Agent 工具调用
-- 设计订单查询、地址修改、退款申请工具
-- 复现工具调用越权
+- 增加退款申请工具
 - 增加高风险操作二次确认
+- 增加工具调用审计日志
+- 增加 promptfoo 自动化测试
 
 第四版目标：
 
