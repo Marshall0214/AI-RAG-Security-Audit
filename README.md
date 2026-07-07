@@ -29,6 +29,12 @@
 - `POST /lab/vulnerable-agent/address-update`：漏洞版地址修改工具
 - 用 Bob 查询和修改 Alice 订单的方式演示 Agent 工具越权
 
+第四版已经加入自动化安全回归测试：
+
+- `tests/security_regression.py`：一键验证第一版、第二版、第三版核心安全场景
+- 自动验证 API 越权拦截、RAG 安全检索、RAG 漏洞泄露、Agent 安全工具、Agent 漏洞工具
+- 支持启动内嵌临时服务测试，也支持对已运行的服务测试
+
 ## 项目定位
 
 这是一个“可被攻击、可被修复、可被审计”的 AI 应用安全项目。
@@ -61,6 +67,7 @@
 - `POST /agent/tools/address-update`：安全版 Agent 地址修改工具
 - `POST /lab/vulnerable-agent/order-query`：漏洞版 Agent 订单查询工具
 - `POST /lab/vulnerable-agent/address-update`：漏洞版 Agent 地址修改工具
+- `tests/security_regression.py`：自动化安全回归测试脚本
 
 ### 安全设计
 
@@ -144,6 +151,39 @@ http://127.0.0.1:8000/docs
 13. Bob 请求 `/lab/vulnerable-agent/order-query` 查询 Alice 订单，会返回订单详情。
 14. Bob 请求 `/agent/tools/address-update` 修改 Alice 订单地址，应返回 `403 Forbidden`。
 15. Bob 请求 `/lab/vulnerable-agent/address-update` 修改 Alice 订单地址，会成功修改，用于演示漏洞。
+
+## 自动化安全回归测试
+
+推荐使用 `rag` Conda 环境运行：
+
+```powershell
+D:\Users\28020\anaconda3\envs\rag\python.exe tests\security_regression.py
+```
+
+脚本会自动启动一个临时测试服务，运行完整安全场景，然后释放端口。
+
+如果你已经手动启动了服务：
+
+```powershell
+D:\Users\28020\anaconda3\envs\rag\python.exe -m uvicorn app.main:app --reload --no-use-colors
+```
+
+也可以对当前服务运行测试：
+
+```powershell
+D:\Users\28020\anaconda3\envs\rag\python.exe tests\security_regression.py --base-url http://127.0.0.1:8000
+```
+
+测试覆盖：
+
+- Alice/Bob 注册和登录
+- Bob 直接访问 Alice 文档被 `403` 拦截
+- Alice 可以通过安全 RAG 检索自己的文档
+- Bob 通过安全 RAG 无法检索 Alice 文档
+- Bob 通过漏洞 RAG 可以检索 Alice 文档
+- Bob 通过安全 Agent 工具无法查询和修改 Alice 订单
+- Bob 通过漏洞 Agent 工具可以查询和修改 Alice 订单
+- Alice 可以观察到漏洞工具造成的地址篡改结果
 
 ## Swagger 页面授权方式
 

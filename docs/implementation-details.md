@@ -307,3 +307,82 @@ order.shipping_address = new_address
 可以这样讲：
 
 > 第三版我模拟了 Agent 工具调用场景，设计了订单查询和地址修改两个工具。安全版工具会在执行前根据当前登录用户校验订单的 owner_id 和 tenant_id，因此 Bob 不能查询或修改 Alice 的订单。漏洞版工具故意只按 order_id 操作，不做后端鉴权，结果 Bob 可以读取并修改 Alice 的订单。这个实验说明 Agent 安全的关键不是让模型“更听话”，而是工具执行层必须有强制权限控制。
+
+## 第四版：自动化安全回归测试
+
+第四版的目标是把前三版的手工验证流程沉淀成自动化安全回归测试。
+
+这样项目不只是“能在 Swagger 里点出来”，还可以证明：
+
+- 安全场景可以重复验证。
+- 漏洞复现有稳定证据。
+- 修复后可以防止回归。
+- 项目具备工程化测试能力。
+
+### 第四版新增文件
+
+```text
+tests/security_regression.py
+```
+
+这个脚本不引入额外测试框架，只使用 Python 标准库、Uvicorn 和当前 FastAPI 应用。
+
+### 两种运行方式
+
+#### 方式一：脚本自动启动临时服务
+
+```powershell
+D:\Users\28020\anaconda3\envs\rag\python.exe tests\security_regression.py
+```
+
+流程：
+
+1. 在本地临时端口启动 FastAPI 应用。
+2. 等待 `/health` 就绪。
+3. 自动注册 Alice/Bob。
+4. 自动运行全部安全测试。
+5. 测试结束后关闭临时服务。
+
+#### 方式二：测试已经运行的服务
+
+```powershell
+D:\Users\28020\anaconda3\envs\rag\python.exe tests\security_regression.py --base-url http://127.0.0.1:8000
+```
+
+这个方式适合你已经手动启动了：
+
+```powershell
+D:\Users\28020\anaconda3\envs\rag\python.exe -m uvicorn app.main:app --reload --no-use-colors
+```
+
+### 第四版测试覆盖
+
+| 测试项 | 预期结果 |
+|---|---|
+| `/health` | 返回 `ok` |
+| Alice/Bob 注册 | 两个用户 ID 不同，租户不同 |
+| Alice/Bob 登录 | 两个用户都拿到不同 Token |
+| Bob 直接访问 Alice 文档 | 返回 `403` |
+| Alice 调安全 RAG | 能检索自己的文档 |
+| Bob 调安全 RAG | 查不到 Alice 文档 |
+| Bob 调漏洞 RAG | 能查到 Alice 文档 |
+| Alice 创建订单 | 订单 owner_id 是 Alice |
+| Bob 调安全订单查询工具 | 返回 `403` |
+| Bob 调漏洞订单查询工具 | 能查到 Alice 订单 |
+| Bob 调安全地址修改工具 | 返回 `403` |
+| Bob 调漏洞地址修改工具 | 能修改 Alice 地址 |
+| Alice 查询订单 | 能看到地址已被漏洞工具篡改 |
+
+### 第四版面试讲法
+
+可以这样讲：
+
+> 第四版我把前三版的安全场景做成了自动化回归测试。脚本会自动启动服务，注册 Alice/Bob，验证 API 越权、RAG 检索泄露、Agent 工具越权这些场景。安全接口必须返回 403 或 0 条结果，漏洞接口必须稳定复现泄露或越权修改。这样项目不仅能手工演示，也能一键生成验证证据。
+
+### 为什么这个版本重要
+
+面试时，这一版可以证明你不只是会“点接口”，还知道如何把安全测试工程化。
+
+核心表达：
+
+> 我把漏洞复现和修复验证都写成了回归测试，后续如果继续改 RAG、Agent 或权限逻辑，可以一键确认安全边界有没有被破坏。
