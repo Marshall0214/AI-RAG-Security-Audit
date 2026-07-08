@@ -35,6 +35,13 @@
 - 自动验证 API 越权拦截、RAG 安全检索、RAG 漏洞泄露、Agent 安全工具、Agent 漏洞工具
 - 支持启动内嵌临时服务测试，也支持对已运行的服务测试
 
+第五版已经加入 Agent 工具审计日志与高风险操作二次确认：
+
+- `POST /agent/tools/address-update`：安全版地址修改现在需要二次确认
+- 第一次请求返回 `confirmation_token`，第二次带 token 才真正修改地址
+- `GET /agent/audit-logs`：查看当前用户的 Agent 工具调用审计日志，管理员可查看全部
+- 漏洞版地址修改仍然不需要确认，用来对比真实风险
+
 ## 项目定位
 
 这是一个“可被攻击、可被修复、可被审计”的 AI 应用安全项目。
@@ -67,6 +74,7 @@
 - `POST /agent/tools/address-update`：安全版 Agent 地址修改工具
 - `POST /lab/vulnerable-agent/order-query`：漏洞版 Agent 订单查询工具
 - `POST /lab/vulnerable-agent/address-update`：漏洞版 Agent 地址修改工具
+- `GET /agent/audit-logs`：查看 Agent 工具调用审计日志
 - `tests/security_regression.py`：自动化安全回归测试脚本
 
 ### 安全设计
@@ -149,8 +157,11 @@ http://127.0.0.1:8000/docs
 11. Alice 创建订单。
 12. Bob 请求 `/agent/tools/order-query` 查询 Alice 订单，应返回 `403 Forbidden`。
 13. Bob 请求 `/lab/vulnerable-agent/order-query` 查询 Alice 订单，会返回订单详情。
-14. Bob 请求 `/agent/tools/address-update` 修改 Alice 订单地址，应返回 `403 Forbidden`。
-15. Bob 请求 `/lab/vulnerable-agent/address-update` 修改 Alice 订单地址，会成功修改，用于演示漏洞。
+14. Alice 请求 `/agent/tools/address-update` 修改自己的地址，会先返回 `confirmation_token`。
+15. Alice 再次请求 `/agent/tools/address-update` 并带上 `confirmation_token`，地址才会修改成功。
+16. Bob 请求 `/agent/tools/address-update` 修改 Alice 订单地址，应返回 `403 Forbidden`。
+17. Bob 请求 `/lab/vulnerable-agent/address-update` 修改 Alice 订单地址，会成功修改，用于演示漏洞。
+18. Bob 请求 `/agent/audit-logs`，可以看到自己的工具调用审计记录。
 
 ## 自动化安全回归测试
 
@@ -184,6 +195,8 @@ D:\Users\28020\anaconda3\envs\rag\python.exe tests\security_regression.py --base
 - Bob 通过安全 Agent 工具无法查询和修改 Alice 订单
 - Bob 通过漏洞 Agent 工具可以查询和修改 Alice 订单
 - Alice 可以观察到漏洞工具造成的地址篡改结果
+- 安全版高风险地址修改必须经过 confirmation token 二次确认
+- Agent 工具调用会生成审计日志
 
 ## Swagger 页面授权方式
 
@@ -220,8 +233,6 @@ http://127.0.0.1:8000/docs
 第三版目标：
 
 - 增加退款申请工具
-- 增加高风险操作二次确认
-- 增加工具调用审计日志
 - 增加 promptfoo 自动化测试
 
 第四版目标：

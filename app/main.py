@@ -17,6 +17,7 @@ from app.schemas import (
     RagQueryResponse,
     RegisterRequest,
     TokenResponse,
+    ToolAuditLogResponse,
     UserResponse,
 )
 from app.security import create_token, verify_password
@@ -24,7 +25,7 @@ from app.security import create_token, verify_password
 app = FastAPI(
     title="AI-RAG-Security-Audit",
     description="AI application security audit lab for RAG and Agent scenarios.",
-    version="0.3.0",
+    version="0.4.0",
 )
 
 
@@ -46,13 +47,23 @@ def to_agent_tool_response(
     safe: bool,
     message: str,
     order: object,
+    requires_confirmation: bool = False,
+    confirmation_token: str | None = None,
+    audit_log_id: int | None = None,
 ) -> AgentToolResponse:
     return AgentToolResponse(
         tool_name=tool_name,
         safe=safe,
         message=message,
         order=to_order_response(order),
+        requires_confirmation=requires_confirmation,
+        confirmation_token=confirmation_token,
+        audit_log_id=audit_log_id,
     )
+
+
+def to_audit_log_response(audit_log: object) -> ToolAuditLogResponse:
+    return ToolAuditLogResponse(**audit_log.__dict__)
 
 
 def to_rag_response(
@@ -210,16 +221,37 @@ def safe_agent_order_query(
 ) -> AgentToolResponse:
     order = db.get_order_for_user(request.order_id, current_user)
     if order is None:
+        db.create_tool_audit_log(
+            actor=current_user,
+            tool_name="order-query",
+            safe=True,
+            action="read",
+            target_order_id=request.order_id,
+            allowed=False,
+            outcome="denied",
+            reason="order not found or access denied",
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="order not found or access denied",
         )
 
+    audit_log = db.create_tool_audit_log(
+        actor=current_user,
+        tool_name="order-query",
+        safe=True,
+        action="read",
+        target_order_id=order.id,
+        allowed=True,
+        outcome="success",
+        reason="current user is authorized for this order",
+    )
     return to_agent_tool_response(
         tool_name="order-query",
         safe=True,
         message="Order returned after current-user authorization.",
         order=order,
+        audit_log_id=audit_log.id,
     )
 
 
@@ -230,24 +262,96 @@ def safe_agent_address_update(
 ) -> AgentToolResponse:
     order = db.get_order_for_user(request.order_id, current_user)
     if order is None:
+        db.create_tool_audit_log(
+            actor=current_user,
+            tool_name="address-update",
+            safe=True,
+            action="write",
+            target_order_id=request.order_id,
+            allowed=False,
+            outcome="denied",
+            reason="order not found or access denied",
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="order not found or access denied",
         )
 
+    if request.confirmation_token is None:
+        confirmation = db.create_pending_address_confirmation(
+            actor=current_user,
+            order=order,
+            new_address=request.new_address,
+        )
+        audit_log = db.create_tool_audit_log(
+            actor=current_user,
+            tool_name="address-update",
+            safe=True,
+            action="write",
+            target_order_id=order.id,
+            allowed=True,
+            outcome="confirmation_required",
+            reason="high-risk write operation requires confirmation token",
+        )
+        return to_agent_tool_response(
+            tool_name="address-update",
+            safe=True,
+            message=(
+                "Confirmation required before updating address. "
+                "Resubmit the same request with confirmation_token."
+            ),
+            order=order,
+            requires_confirmation=True,
+            confirmation_token=confirmation.token,
+            audit_log_id=audit_log.id,
+        )
+
+    confirmed = db.consume_address_confirmation(
+        token=request.confirmation_token,
+        actor=current_user,
+        order_id=request.order_id,
+        new_address=request.new_address,
+    )
+    if not confirmed:
+        db.create_tool_audit_log(
+            actor=current_user,
+            tool_name="address-update",
+            safe=True,
+            action="write",
+            target_order_id=order.id,
+            allowed=False,
+            outcome="confirmation_failed",
+            reason="missing, invalid, mismatched, or reused confirmation token",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="invalid confirmation token",
+        )
+
     updated_order = db.update_order_address(order, request.new_address)
+    audit_log = db.create_tool_audit_log(
+        actor=current_user,
+        tool_name="address-update",
+        safe=True,
+        action="write",
+        target_order_id=order.id,
+        allowed=True,
+        outcome="success",
+        reason="current user is authorized and confirmation token is valid",
+    )
     return to_agent_tool_response(
         tool_name="address-update",
         safe=True,
-        message="Address updated after current-user authorization.",
+        message="Address updated after current-user authorization and confirmation.",
         order=updated_order,
+        audit_log_id=audit_log.id,
     )
 
 
 @app.post("/lab/vulnerable-agent/order-query", response_model=AgentToolResponse)
 def vulnerable_agent_order_query(
     request: OrderQueryRequest,
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> AgentToolResponse:
     order = db.get_order_without_authorization(request.order_id)
     if order is None:
@@ -256,18 +360,29 @@ def vulnerable_agent_order_query(
             detail="order not found",
         )
 
+    audit_log = db.create_tool_audit_log(
+        actor=current_user,
+        tool_name="vulnerable-order-query",
+        safe=False,
+        action="read",
+        target_order_id=order.id,
+        allowed=True,
+        outcome="vulnerable_success",
+        reason="order returned without owner or tenant authorization",
+    )
     return to_agent_tool_response(
         tool_name="vulnerable-order-query",
         safe=False,
         message="VULNERABLE DEMO: order returned without owner or tenant authorization.",
         order=order,
+        audit_log_id=audit_log.id,
     )
 
 
 @app.post("/lab/vulnerable-agent/address-update", response_model=AgentToolResponse)
 def vulnerable_agent_address_update(
     request: AddressUpdateRequest,
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> AgentToolResponse:
     order = db.get_order_without_authorization(request.order_id)
     if order is None:
@@ -277,12 +392,33 @@ def vulnerable_agent_address_update(
         )
 
     updated_order = db.update_order_address(order, request.new_address)
+    audit_log = db.create_tool_audit_log(
+        actor=current_user,
+        tool_name="vulnerable-address-update",
+        safe=False,
+        action="write",
+        target_order_id=order.id,
+        allowed=True,
+        outcome="vulnerable_success",
+        reason="address updated without owner or tenant authorization or confirmation",
+    )
     return to_agent_tool_response(
         tool_name="vulnerable-address-update",
         safe=False,
         message="VULNERABLE DEMO: address updated without owner or tenant authorization.",
         order=updated_order,
+        audit_log_id=audit_log.id,
     )
+
+
+@app.get("/agent/audit-logs", response_model=list[ToolAuditLogResponse])
+def list_agent_audit_logs(
+    current_user: User = Depends(get_current_user),
+) -> list[ToolAuditLogResponse]:
+    return [
+        to_audit_log_response(audit_log)
+        for audit_log in db.list_tool_audit_logs_for_user(current_user)
+    ]
 
 
 @app.post("/rag/query", response_model=RagQueryResponse)

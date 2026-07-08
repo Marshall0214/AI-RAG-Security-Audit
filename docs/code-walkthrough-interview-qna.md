@@ -23,10 +23,11 @@
 2. 第二版：实现 RAG 文档切片和检索，演示检索阶段缺少权限过滤会导致跨用户文档泄露。
 3. 第三版：实现 Agent 工具调用实验，演示工具执行层缺少后端鉴权会导致跨用户订单查询和地址修改。
 4. 第四版：实现自动化安全回归测试，一键验证 API、RAG、Agent 三类安全场景。
+5. 第五版：实现 Agent 工具调用审计日志和高风险地址修改二次确认。
 
 面试时可以这样开场：
 
-> 我做的是一个面向 RAG 和 Agent 场景的 AI 应用安全审计实验平台。第一版先做身份、租户和文档权限边界；第二版加入 RAG 检索，对比安全检索和漏洞检索；第三版加入 Agent 工具调用，对比安全工具和漏洞工具；第四版把这些场景沉淀成自动化安全回归测试。核心结论是：模型不能作为权限边界，后端必须在检索阶段和工具执行阶段强制鉴权。
+> 我做的是一个面向 RAG 和 Agent 场景的 AI 应用安全审计实验平台。第一版先做身份、租户和文档权限边界；第二版加入 RAG 检索，对比安全检索和漏洞检索；第三版加入 Agent 工具调用，对比安全工具和漏洞工具；第四版把这些场景沉淀成自动化安全回归测试；第五版补充工具调用审计日志和高风险操作二次确认。核心结论是：模型不能作为权限边界，后端必须在检索阶段和工具执行阶段强制鉴权。
 
 ## 代码地图
 
@@ -484,6 +485,32 @@ update_order_address(order, new_address)
 
 > Agent 的模型层只能生成候选参数，不能决定用户是否有权执行操作。真正的权限判断必须在工具后端完成。否则攻击者可以通过提示注入、参数猜测或上下文污染诱导 Agent 调用工具操作其他用户资源。
 
+### 第五版新增控制：审计日志和二次确认
+
+位置：
+
+- `app/models.py` 的 `ToolAuditLog` 和 `PendingToolConfirmation`
+- `app/database.py` 的 `create_tool_audit_log`、`create_pending_address_confirmation`、`consume_address_confirmation`
+- `app/main.py` 的 `/agent/tools/address-update` 和 `/agent/audit-logs`
+
+核心逻辑：
+
+```text
+安全地址修改第一次请求：
+  已授权，但不直接修改
+  创建 confirmation token
+  写入 confirmation_required 审计日志
+
+安全地址修改第二次请求：
+  校验 token、用户、租户、订单、新地址
+  校验通过才修改
+  写入 success 审计日志
+```
+
+面试说法：
+
+> 第五版我把 Agent 写操作做成二次确认。安全版地址修改第一次只生成 confirmation token，不直接执行；第二次带 token 且参数完全匹配才修改。这样可以防止高风险工具被一次模型调用直接触发。同时每次工具调用都会写审计日志，便于事后追踪。
+
 ## 第六部分：安全版和漏洞版对照表
 
 | 场景 | 安全接口 | 漏洞接口 | 差异 |
@@ -492,6 +519,8 @@ update_order_address(order, new_address)
 | RAG 检索 | `POST /rag/query` | `POST /lab/vulnerable-rag/query` | 安全版先按 user/tenant 过滤 chunk，漏洞版全局搜索 |
 | 订单查询 | `POST /agent/tools/order-query` | `POST /lab/vulnerable-agent/order-query` | 安全版调用 `get_order_for_user`，漏洞版只按 `order_id` 查 |
 | 地址修改 | `POST /agent/tools/address-update` | `POST /lab/vulnerable-agent/address-update` | 安全版先鉴权再修改，漏洞版直接修改 |
+| 工具审计 | `GET /agent/audit-logs` | 漏洞接口也会留下 `vulnerable_success` 日志 | 记录工具调用主体、目标订单、结果和原因 |
+| 二次确认 | 安全版地址修改需要 `confirmation_token` | 漏洞版不需要确认 | 安全版防止高风险写操作被一次请求触发 |
 
 ## 高频面试问答
 
@@ -555,6 +584,18 @@ update_order_address(order, new_address)
 
 > 我会做四件事：第一，接入 Chroma 或 Qdrant，把关键词检索替换成向量检索；第二，增加工具调用审计日志；第三，对地址修改、退款这类高风险工具加二次确认；第四，继续接入 promptfoo 或 PyRIT，把现有回归测试扩展成更完整的 AI 红队测试集。
 
+### Q11：第五版为什么要加二次确认？
+
+答：
+
+> Agent 工具调用里，写操作比读操作风险更高。查询订单是信息泄露风险，修改地址是直接篡改业务数据。第五版让安全版地址修改先生成 confirmation token，用户二次确认后才执行，模拟真实系统里的高风险操作确认机制。
+
+### Q12：审计日志有什么价值？
+
+答：
+
+> 审计日志能记录谁调用了什么工具、目标订单是什么、是否允许、结果是什么。安全事件发生后，可以通过日志还原攻击路径。比如 Bob 通过漏洞工具修改 Alice 地址，会留下 `vulnerable_success` 记录。
+
 ## 你需要重点背的 5 句话
 
 1. 模型不能作为权限边界，后端必须强制鉴权。
@@ -567,14 +608,16 @@ update_order_address(order, new_address)
 
 推荐演示 6 分钟版本：
 
-1. 先讲项目四版结构。
+1. 先讲项目五版结构。
 2. 演示 Alice 上传文档，Bob 直接访问被 `403`。
 3. 演示 Bob 调 `/rag/query` 查不到 Alice 文档。
 4. 演示 Bob 调 `/lab/vulnerable-rag/query` 能召回 Alice 文档。
 5. 演示 Bob 调安全 Agent 工具查 Alice 订单被 `403`。
 6. 演示 Bob 调漏洞 Agent 工具能查订单并改地址。
-7. 运行 `tests/security_regression.py`，展示这些场景可以一键回归验证。
-8. 总结：AI 应用安全关键在后端权限边界，不在模型“听不听话”。
+7. 演示安全版地址修改需要 confirmation token。
+8. 演示 `/agent/audit-logs` 可以查看工具调用审计记录。
+9. 运行 `tests/security_regression.py`，展示这些场景可以一键回归验证。
+10. 总结：AI 应用安全关键在后端权限边界，不在模型“听不听话”。
 
 ## 代码追问时的回答策略
 

@@ -1,4 +1,15 @@
-from app.models import Document, DocumentChunk, Order, Role, User
+from datetime import datetime, timezone
+from secrets import token_urlsafe
+
+from app.models import (
+    Document,
+    DocumentChunk,
+    Order,
+    PendingToolConfirmation,
+    Role,
+    ToolAuditLog,
+    User,
+)
 from app.rag import chunk_text, score_chunk
 from app.security import hash_password
 
@@ -9,10 +20,13 @@ class InMemoryDatabase:
         self.documents: dict[int, Document] = {}
         self.document_chunks: dict[int, DocumentChunk] = {}
         self.orders: dict[int, Order] = {}
+        self.tool_audit_logs: dict[int, ToolAuditLog] = {}
+        self.pending_tool_confirmations: dict[str, PendingToolConfirmation] = {}
         self._user_id = 1
         self._document_id = 1
         self._chunk_id = 1
         self._order_id = 1
+        self._audit_log_id = 1
 
         self.create_user(
             username="admin",
@@ -154,6 +168,89 @@ class InMemoryDatabase:
     def update_order_address(self, order: Order, new_address: str) -> Order:
         order.shipping_address = new_address
         return order
+
+    def create_tool_audit_log(
+        self,
+        actor: User,
+        tool_name: str,
+        safe: bool,
+        action: str,
+        target_order_id: int,
+        allowed: bool,
+        outcome: str,
+        reason: str,
+    ) -> ToolAuditLog:
+        audit_log = ToolAuditLog(
+            id=self._audit_log_id,
+            actor_user_id=actor.id,
+            actor_tenant_id=actor.tenant_id,
+            tool_name=tool_name,
+            safe=safe,
+            action=action,
+            target_order_id=target_order_id,
+            allowed=allowed,
+            outcome=outcome,
+            reason=reason,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        self.tool_audit_logs[audit_log.id] = audit_log
+        self._audit_log_id += 1
+        return audit_log
+
+    def list_tool_audit_logs_for_user(self, user: User) -> list[ToolAuditLog]:
+        if user.role == Role.ADMIN:
+            return list(self.tool_audit_logs.values())
+
+        return [
+            audit_log
+            for audit_log in self.tool_audit_logs.values()
+            if audit_log.actor_user_id == user.id
+            and audit_log.actor_tenant_id == user.tenant_id
+        ]
+
+    def create_pending_address_confirmation(
+        self,
+        actor: User,
+        order: Order,
+        new_address: str,
+    ) -> PendingToolConfirmation:
+        confirmation = PendingToolConfirmation(
+            token=token_urlsafe(24),
+            actor_user_id=actor.id,
+            actor_tenant_id=actor.tenant_id,
+            tool_name="address-update",
+            target_order_id=order.id,
+            new_address=new_address,
+            consumed=False,
+        )
+        self.pending_tool_confirmations[confirmation.token] = confirmation
+        return confirmation
+
+    def consume_address_confirmation(
+        self,
+        token: str,
+        actor: User,
+        order_id: int,
+        new_address: str,
+    ) -> bool:
+        confirmation = self.pending_tool_confirmations.get(token)
+        if confirmation is None or confirmation.consumed:
+            return False
+
+        if confirmation.actor_user_id != actor.id:
+            return False
+
+        if confirmation.actor_tenant_id != actor.tenant_id:
+            return False
+
+        if confirmation.target_order_id != order_id:
+            return False
+
+        if confirmation.new_address != new_address:
+            return False
+
+        confirmation.consumed = True
+        return True
 
     def search_chunks_for_user(
         self,

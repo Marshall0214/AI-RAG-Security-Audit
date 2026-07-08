@@ -42,3 +42,29 @@ class Order:
     shipping_address: str
     owner_id: int
     tenant_id: str
+
+
+@dataclass
+class ToolAuditLog:
+    id: int
+    actor_user_id: int
+    actor_tenant_id: str
+    tool_name: str
+    safe: bool
+    action: str
+    target_order_id: int
+    allowed: bool
+    outcome: str
+    reason: str
+    created_at: str
+
+
+@dataclass
+class PendingToolConfirmation:
+    token: str
+    actor_user_id: int
+    actor_tenant_id: str
+    tool_name: str
+    target_order_id: int
+    new_address: str
+    consumed: bool

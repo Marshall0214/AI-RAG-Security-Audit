@@ -386,3 +386,126 @@ D:\Users\28020\anaconda3\envs\rag\python.exe -m uvicorn app.main:app --reload --
 核心表达：
 
 > 我把漏洞复现和修复验证都写成了回归测试，后续如果继续改 RAG、Agent 或权限逻辑，可以一键确认安全边界有没有被破坏。
+
+## 第五版：Agent 工具审计日志与高风险操作二次确认
+
+第五版的目标是把 Agent 工具调用从“能拦截越权”推进到“更接近真实企业安全控制”。
+
+真实企业环境里，Agent 工具调用至少需要两类控制：
+
+1. 工具调用审计日志：谁在什么时候调用了什么工具，操作了哪个资源，结果是成功、拒绝还是漏洞演示。
+2. 高风险操作二次确认：地址修改、退款、转账、删除数据等写操作不能一次请求直接执行。
+
+### 第五版新增数据模型
+
+`ToolAuditLog`：
+
+- `id`：审计日志 ID
+- `actor_user_id`：调用工具的用户
+- `actor_tenant_id`：调用者租户
+- `tool_name`：工具名称
+- `safe`：是否安全版工具
+- `action`：读操作或写操作
+- `target_order_id`：目标订单
+- `allowed`：是否允许执行
+- `outcome`：执行结果，例如 `success`、`denied`、`confirmation_required`、`vulnerable_success`
+- `reason`：原因说明
+- `created_at`：创建时间
+
+`PendingToolConfirmation`：
+
+- `token`：确认 token
+- `actor_user_id`：申请确认的用户
+- `actor_tenant_id`：申请确认的租户
+- `tool_name`：工具名称
+- `target_order_id`：目标订单
+- `new_address`：待确认的新地址
+- `consumed`：是否已经使用
+
+### 第五版新增接口
+
+```text
+GET /agent/audit-logs
+```
+
+普通用户只能查看自己的工具调用日志。
+
+管理员可以查看全部工具调用日志。
+
+### 安全版地址修改新流程
+
+第五版后，安全版地址修改不再一次请求直接修改。
+
+第一次请求：
+
+```text
+POST /agent/tools/address-update
+```
+
+```json
+{
+  "order_id": 1,
+  "new_address": "Alice Confirmed Address"
+}
+```
+
+返回：
+
+```json
+{
+  "requires_confirmation": true,
+  "confirmation_token": "..."
+}
+```
+
+第二次请求：
+
+```json
+{
+  "order_id": 1,
+  "new_address": "Alice Confirmed Address",
+  "confirmation_token": "..."
+}
+```
+
+只有 token 和当前用户、订单 ID、新地址全部匹配，才会真正修改地址。
+
+### 安全收益
+
+- 防止高风险写操作被一次请求直接执行。
+- 防止 confirmation token 被其他用户拿去复用。
+- 防止 token 被换到另一个订单或另一个地址上使用。
+- 每一次成功、拒绝、确认申请、漏洞演示都会产生审计记录。
+
+### 漏洞版对比
+
+漏洞版接口仍然保持不安全设计：
+
+```text
+POST /lab/vulnerable-agent/address-update
+```
+
+它仍然：
+
+- 不校验订单归属
+- 不要求确认 token
+- 直接修改目标订单地址
+
+这样可以清楚对比安全版和漏洞版的差异。
+
+### 第五版测试覆盖
+
+自动化回归测试新增覆盖：
+
+- Alice 安全修改自己的地址时，第一次请求必须返回 confirmation token。
+- Alice 带 confirmation token 后，地址才修改成功。
+- Bob 安全查询 Alice 订单仍然返回 `403`。
+- Bob 安全修改 Alice 地址仍然返回 `403`。
+- Bob 漏洞接口仍然可以查询和修改 Alice 订单。
+- Bob 的工具调用会产生审计日志。
+
+### 第五版面试讲法
+
+可以这样讲：
+
+> 第五版我给 Agent 工具调用增加了审计日志和高风险操作二次确认。安全版地址修改现在不是一次请求直接执行，而是先生成 confirmation token，用户确认后才真正修改。所有工具调用都会记录审计日志，包括成功、拒绝、确认申请和漏洞演示。这样项目更接近真实企业里对 Agent 工具调用的安全控制。

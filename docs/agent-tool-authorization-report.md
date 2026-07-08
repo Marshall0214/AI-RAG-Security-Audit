@@ -26,6 +26,7 @@ POST /lab/vulnerable-agent/address-update
 ```text
 POST /agent/tools/order-query
 POST /agent/tools/address-update
+GET /agent/audit-logs
 ```
 
 ## 前置条件
@@ -126,7 +127,54 @@ POST /agent/tools/address-update
 403 Forbidden
 ```
 
-### 5. Bob 调用漏洞地址修改工具
+### 5. Alice 调用安全地址修改工具
+
+第五版后，安全地址修改属于高风险写操作，需要二次确认。
+
+第一次请求：
+
+```text
+POST /agent/tools/address-update
+```
+
+```json
+{
+  "order_id": 1,
+  "new_address": "Alice Confirmed Address"
+}
+```
+
+预期结果：
+
+```json
+{
+  "requires_confirmation": true,
+  "confirmation_token": "..."
+}
+```
+
+第二次请求：
+
+```json
+{
+  "order_id": 1,
+  "new_address": "Alice Confirmed Address",
+  "confirmation_token": "..."
+}
+```
+
+预期结果：
+
+```json
+{
+  "requires_confirmation": false,
+  "order": {
+    "shipping_address": "Alice Confirmed Address"
+  }
+}
+```
+
+### 6. Bob 调用漏洞地址修改工具
 
 ```text
 POST /lab/vulnerable-agent/address-update
@@ -149,6 +197,19 @@ POST /lab/vulnerable-agent/address-update
 ```
 
 说明 Bob 成功修改了 Alice 的订单地址。
+
+### 7. 查看工具调用审计日志
+
+```text
+GET /agent/audit-logs
+```
+
+Bob 可以看到自己的工具调用记录，包括：
+
+- 安全查询被拒绝：`denied`
+- 漏洞查询成功：`vulnerable_success`
+- 安全地址修改被拒绝：`denied`
+- 漏洞地址修改成功：`vulnerable_success`
 
 ## 根因分析
 
@@ -187,3 +248,5 @@ order.tenant_id == current_user.tenant_id
 ## 面试讲法
 
 这个漏洞说明 Agent 安全不能依赖提示词或模型自觉。即使系统提示词要求“只能操作当前用户订单”，攻击者仍可能诱导模型传入其他人的 `order_id`。真正的安全边界必须在工具后端实现，模型只负责生成候选参数，后端负责鉴权和执行。
+
+第五版中，安全版地址修改已经加入 confirmation token 二次确认，并为工具调用写入审计日志。漏洞版接口仍然保留无确认、无授权的直接修改行为，用来对比说明真实 Agent 工具执行层的风险。

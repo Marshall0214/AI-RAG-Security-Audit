@@ -222,6 +222,39 @@ def run_security_regression(base_url: str) -> list[TestResult]:
         f"Order owner is {order['owner_id']}",
     )
 
+    _, alice_confirmation_required = client.post(
+        "/agent/tools/address-update",
+        {
+            "order_id": order["id"],
+            "new_address": "Alice Confirmed Address",
+        },
+        token=alice_token,
+    )
+    confirmation_token = alice_confirmation_required["confirmation_token"]
+    _, alice_confirmed_update = client.post(
+        "/agent/tools/address-update",
+        {
+            "order_id": order["id"],
+            "new_address": "Alice Confirmed Address",
+            "confirmation_token": confirmation_token,
+        },
+        token=alice_token,
+    )
+    assert_result(
+        results,
+        "safe Agent address update requires confirmation",
+        alice_confirmation_required["requires_confirmation"] is True
+        and bool(confirmation_token),
+        f"Confirmation response={alice_confirmation_required}",
+    )
+    assert_result(
+        results,
+        "safe Agent address update succeeds after confirmation",
+        alice_confirmed_update["order"]["shipping_address"] == "Alice Confirmed Address"
+        and alice_confirmed_update["requires_confirmation"] is False,
+        f"Confirmed update response={alice_confirmed_update}",
+    )
+
     bob_safe_query_status, _ = client.post(
         "/agent/tools/order-query",
         {"order_id": order["id"]},
@@ -251,6 +284,7 @@ def run_security_regression(base_url: str) -> list[TestResult]:
         token=bob_token,
     )
     _, alice_orders = client.get("/orders", token=alice_token)
+    _, bob_audit_logs = client.get("/agent/audit-logs", token=bob_token)
 
     assert_result(
         results,
@@ -281,6 +315,14 @@ def run_security_regression(base_url: str) -> list[TestResult]:
         "owner observes vulnerable write impact",
         alice_orders[0]["shipping_address"] == "Bob Attack Address",
         f"Alice orders={alice_orders}",
+    )
+    assert_result(
+        results,
+        "Agent tool calls create audit logs",
+        len(bob_audit_logs) >= 4
+        and {audit_log["outcome"] for audit_log in bob_audit_logs}
+        >= {"denied", "vulnerable_success"},
+        f"Bob audit logs={bob_audit_logs}",
     )
 
     return results

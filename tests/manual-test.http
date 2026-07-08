@@ -122,6 +122,27 @@ Authorization: Bearer {{alice_token}}
 GET http://127.0.0.1:8000/orders
 Authorization: Bearer {{alice_token}}
 
+### Alice safely requests address update and receives confirmation token
+POST http://127.0.0.1:8000/agent/tools/address-update
+Content-Type: application/json
+Authorization: Bearer {{alice_token}}
+
+{
+  "order_id": 1,
+  "new_address": "Alice Confirmed Address"
+}
+
+### Alice confirms the high-risk address update
+POST http://127.0.0.1:8000/agent/tools/address-update
+Content-Type: application/json
+Authorization: Bearer {{alice_token}}
+
+{
+  "order_id": 1,
+  "new_address": "Alice Confirmed Address",
+  "confirmation_token": "{{alice_confirmation_token}}"
+}
+
 ### Bob safely queries Alice order and should receive 403
 POST http://127.0.0.1:8000/agent/tools/order-query
 Content-Type: application/json
@@ -163,3 +184,11 @@ Authorization: Bearer {{bob_token}}
 ### Alice sees that her order address was modified through the vulnerable tool
 GET http://127.0.0.1:8000/orders
 Authorization: Bearer {{alice_token}}
+
+### Bob reviews his Agent tool audit logs
+GET http://127.0.0.1:8000/agent/audit-logs
+Authorization: Bearer {{bob_token}}
+
+### Admin reviews all Agent tool audit logs
+GET http://127.0.0.1:8000/agent/audit-logs
+Authorization: Bearer {{admin_token}}
