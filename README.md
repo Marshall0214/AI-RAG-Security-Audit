@@ -1,5 +1,19 @@
 # AI-RAG-Security-Audit
 
+## 第六版新增
+
+第六版已经加入 AI 安全红队测试集：
+
+- `tests/ai_security_cases.json`：用 JSON 维护 RAG、Agent、越权访问、confirmation token、审计日志等攻击用例。
+- `tests/ai_red_team_suite.py`：自动准备 Alice/Bob 场景，并批量执行安全红队测试。
+- `docs/ai-security-test-workflow.md`：记录第六版设计目标、执行方式、覆盖场景和面试讲法。
+
+运行第六版红队测试：
+
+```powershell
+D:\Users\28020\anaconda3\envs\rag\python.exe tests\ai_red_team_suite.py
+```
+
 面向秋招展示的 AI 应用安全审计实验平台第一版。
 
 第一版先不追求复杂页面和完整大模型能力，重点建立安全边界：
