@@ -25,7 +25,7 @@ from app.security import create_token, verify_password
 app = FastAPI(
     title="AI-RAG-Security-Audit",
     description="AI application security audit lab for RAG and Agent scenarios.",
-    version="0.6.0",
+    version="0.7.0",
 )
 
 

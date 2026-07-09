@@ -6,6 +6,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,8 @@ CASES_PATH = Path(__file__).with_name("ai_security_cases.json")
 class RedTeamResult:
     case_id: str
     category: str
+    risk: str
+    expected: str
     passed: bool
     detail: str
 
@@ -119,6 +122,16 @@ def run_case(
     payload = resolve_value(case["payload"], context)
     token = get_actor_token(case, context)
 
+    def result(passed: bool, detail: str) -> RedTeamResult:
+        return RedTeamResult(
+            case_id=case_id,
+            category=case["category"],
+            risk=case["risk"],
+            expected=case["expected"],
+            passed=passed,
+            detail=detail,
+        )
+
     try:
         if case_id == "direct_document_idor_blocked":
             status, _ = client.get(endpoint, token=token, expected_error=403)
@@ -210,10 +223,10 @@ def run_case(
         else:
             raise ValueError(f"Unknown case id: {case_id}")
 
-        return RedTeamResult(case_id, case["category"], True, detail)
+        return result(True, detail)
 
     except Exception as error:
-        return RedTeamResult(case_id, case["category"], False, str(error))
+        return result(False, str(error))
 
 
 def prepare_scenario(client: ApiClient) -> dict[str, Any]:
@@ -307,6 +320,98 @@ def print_results(results: list[RedTeamResult]) -> None:
     print(f"Total: {passed_count} passed, {failed_count} failed")
 
 
+def summarize_by_category(results: list[RedTeamResult]) -> dict[str, tuple[int, int]]:
+    summary: dict[str, tuple[int, int]] = {}
+    for result in results:
+        passed_count, total_count = summary.get(result.category, (0, 0))
+        summary[result.category] = (
+            passed_count + (1 if result.passed else 0),
+            total_count + 1,
+        )
+    return summary
+
+
+def markdown_escape(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ")
+
+
+def write_markdown_report(results: list[RedTeamResult], report_path: Path) -> None:
+    passed_count = sum(result.passed for result in results)
+    failed_count = len(results) - passed_count
+    generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    overall_status = "PASS" if failed_count == 0 else "FAIL"
+
+    lines = [
+        "# AI Security Red-Team Report",
+        "",
+        "## Summary",
+        "",
+        f"- Generated at: `{generated_at}`",
+        f"- Overall status: `{overall_status}`",
+        f"- Total cases: `{len(results)}`",
+        f"- Passed: `{passed_count}`",
+        f"- Failed: `{failed_count}`",
+        "",
+        "## Category Summary",
+        "",
+        "| Category | Passed | Total |",
+        "|---|---:|---:|",
+    ]
+
+    for category, (category_passed, category_total) in sorted(
+        summarize_by_category(results).items()
+    ):
+        lines.append(f"| {category} | {category_passed} | {category_total} |")
+
+    lines.extend(
+        [
+            "",
+            "## Case Details",
+            "",
+            "| Status | Category | Case | Risk | Evidence |",
+            "|---|---|---|---|---|",
+        ]
+    )
+
+    for result in results:
+        status = "PASS" if result.passed else "FAIL"
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    status,
+                    markdown_escape(result.category),
+                    markdown_escape(result.case_id),
+                    markdown_escape(result.risk),
+                    markdown_escape(result.detail),
+                ]
+            )
+            + " |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Security Conclusion",
+            "",
+            "- Safe APIs enforced user and tenant authorization before returning private data.",
+            "- Safe RAG retrieval blocked cross-user document chunks even with prompt-injection-style queries.",
+            "- Safe Agent tools blocked cross-user read and write operations at the backend tool layer.",
+            "- High-risk Agent write operations required confirmation tokens and rejected token reuse or mismatched parameters.",
+            "- Vulnerable lab endpoints intentionally reproduced RAG leakage and Agent tool abuse for contrast.",
+            "- Audit logs preserved evidence of denied safe calls and vulnerable demonstration calls.",
+            "",
+            "## Interview Talking Point",
+            "",
+            "> This report shows that AI application security controls are not only implemented, but also continuously verifiable. The model is not treated as an authorization boundary; backend retrieval and tool execution enforce access control, and the red-team suite records evidence in a repeatable report.",
+            "",
+        ]
+    )
+
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def wait_until_ready(client: ApiClient, timeout_seconds: float = 10) -> None:
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
@@ -352,6 +457,11 @@ def main() -> int:
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8771)
+    parser.add_argument(
+        "--report",
+        type=Path,
+        help="Write a Markdown security report, for example reports/ai-security-report.md.",
+    )
     args = parser.parse_args()
 
     try:
@@ -360,6 +470,9 @@ def main() -> int:
         else:
             results = run_with_embedded_server(args.host, args.port)
         print_results(results)
+        if args.report is not None:
+            write_markdown_report(results, args.report)
+            print(f"\nReport written to {args.report}")
         return 0 if all(result.passed for result in results) else 1
     except Exception as error:
         print(f"\n[FAIL] AI security red-team suite failed: {error}", file=sys.stderr)

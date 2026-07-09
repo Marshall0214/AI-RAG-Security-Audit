@@ -154,6 +154,7 @@ D:\Users\28020\anaconda3\envs\rag\python.exe tests\ai_red_team_suite.py
 
 第六版之后可以继续扩展：
 
+- 第七版已经支持通过 `--report` 导出 Markdown 安全测试报告。
 - 接入 `promptfoo`，把 JSON 用例升级成标准 AI 评测配置。
 - 增加更多 prompt injection payload。
 - 增加 RAG 数据投毒测试。

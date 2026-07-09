@@ -1,5 +1,19 @@
 # AI-RAG-Security-Audit
 
+## 第七版新增
+
+第七版已经加入 Markdown 安全报告导出能力：
+
+- `tests/ai_red_team_suite.py --report reports\ai-security-red-team-report.md`：运行红队测试并生成报告。
+- `docs/security-report-template.md`：记录安全报告模板、测试范围和面试讲法。
+- `reports/`：保存自动生成的安全测试报告。
+
+运行第七版报告生成：
+
+```powershell
+D:\Users\28020\anaconda3\envs\rag\python.exe tests\ai_red_team_suite.py --report reports\ai-security-red-team-report.md
+```
+
 ## 第六版新增
 
 第六版已经加入 AI 安全红队测试集：
