@@ -1,5 +1,22 @@
 # AI-RAG-Security-Audit
 
+## 第八版新增
+
+第八版已经把 RAG 从关键词检索升级为 Chroma 向量检索：
+
+- `app/vector_store.py`：使用 Chroma 保存文档切片向量和 metadata。
+- 每个 chunk 的 metadata 包含 `owner_id`、`tenant_id`、`document_id`、`chunk_id`。
+- 安全版 `/rag/query` 会在向量检索时使用 metadata filter，只召回当前用户可访问的 chunk。
+- 漏洞版 `/lab/vulnerable-rag/query` 故意不带 metadata filter，用来复现跨用户向量召回泄露。
+- 使用本地确定性 embedding，避免依赖外部大模型 API 或模型下载，重点展示向量库权限过滤机制。
+
+第八版验证命令：
+
+```powershell
+D:\Users\28020\anaconda3\envs\rag\python.exe tests\security_regression.py
+D:\Users\28020\anaconda3\envs\rag\python.exe tests\ai_red_team_suite.py --report reports\ai-security-red-team-report.md
+```
+
 ## 第七版新增
 
 第七版已经加入 Markdown 安全报告导出能力：

@@ -10,8 +10,9 @@ from app.models import (
     ToolAuditLog,
     User,
 )
-from app.rag import chunk_text, score_chunk
+from app.rag import chunk_text
 from app.security import hash_password
+from app.vector_store import ChromaRagStore
 
 
 class InMemoryDatabase:
@@ -22,6 +23,7 @@ class InMemoryDatabase:
         self.orders: dict[int, Order] = {}
         self.tool_audit_logs: dict[int, ToolAuditLog] = {}
         self.pending_tool_confirmations: dict[str, PendingToolConfirmation] = {}
+        self.rag_store = ChromaRagStore()
         self._user_id = 1
         self._document_id = 1
         self._chunk_id = 1
@@ -90,6 +92,7 @@ class InMemoryDatabase:
                 tenant_id=document.tenant_id,
             )
             self.document_chunks[chunk.id] = chunk
+            self.rag_store.add_chunk(chunk, document)
             self._chunk_id += 1
             chunks.append(chunk)
 
@@ -258,42 +261,29 @@ class InMemoryDatabase:
         user: User,
         max_results: int,
     ) -> list[tuple[DocumentChunk, int]]:
-        if user.role == Role.ADMIN:
-            chunks = list(self.document_chunks.values())
-        else:
-            chunks = [
-                chunk
-                for chunk in self.document_chunks.values()
-                if chunk.owner_id == user.id and chunk.tenant_id == user.tenant_id
-            ]
-
-        return self._rank_chunks(query, chunks, max_results)
+        return self._chunks_from_vector_matches(
+            self.rag_store.search_for_user(query, user, max_results)
+        )
 
     def search_all_chunks(
         self,
         query: str,
         max_results: int,
     ) -> list[tuple[DocumentChunk, int]]:
-        return self._rank_chunks(query, list(self.document_chunks.values()), max_results)
+        return self._chunks_from_vector_matches(
+            self.rag_store.search_all(query, max_results)
+        )
 
-    def _rank_chunks(
+    def _chunks_from_vector_matches(
         self,
-        query: str,
-        chunks: list[DocumentChunk],
-        max_results: int,
+        matches: list[tuple[int, int]],
     ) -> list[tuple[DocumentChunk, int]]:
-        scored_chunks: list[tuple[DocumentChunk, int]] = []
-        for chunk in chunks:
-            document = self.documents.get(chunk.document_id)
-            if document is None:
-                continue
+        ranked_chunks: list[tuple[DocumentChunk, int]] = []
+        for chunk_id, score in matches:
+            chunk = self.document_chunks.get(chunk_id)
+            if chunk is not None:
+                ranked_chunks.append((chunk, score))
 
-            score = score_chunk(query, chunk, document.title)
-            if score > 0:
-                scored_chunks.append((chunk, score))
-
-        scored_chunks.sort(key=lambda item: item[1], reverse=True)
-        return scored_chunks[:max_results]
-
+        return ranked_chunks
 
 db = InMemoryDatabase()
